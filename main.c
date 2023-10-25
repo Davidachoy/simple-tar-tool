@@ -5,6 +5,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdbool.h>
+
 typedef enum {
     ACTIVE,
     DELETED
@@ -304,13 +305,114 @@ void list_free_spaces(const char *archive_name) {
     fclose(archive);
 }
 
+void defragment(
+    char *archive_name
+) {
+    FILE *archive = fopen(archive_name, "rb+");
+    if (!archive) {
+        printf("Error al abrir el archivo %s\n", archive_name);
+        return;
+    }
+    ArchiveMetadata metadata;
+    fread(&metadata, sizeof(ArchiveMetadata), 1, archive);
+    long read_index = sizeof(ArchiveMetadata);
+    long write_index = sizeof(ArchiveMetadata);
 
-int main() {
-    char *files[] = {"file1.txt", "file2.txt"};
-    
-    create("archive.tar", files, 2);
-    list("archive.tar");
-    //extract("archive.bin", "file1.txt");
-    //delete("archive.bin", "file1.txt");
+    for (int i = 0; i < metadata.num_files; i++) {
+        // Colocar el índice de lectura en la posición actual
+        fseek(archive, read_index, SEEK_SET);
+        FileInfo file_info;
+        fread(&file_info, sizeof(FileInfo), 1, archive);
+        if (file_info.status == ACTIVE) {
+
+            // Cambiar la posición de inicio
+            file_info.start_position = write_index + sizeof(FileInfo);
+            
+            // Colocar el índice de escritura en la posición correspondiente
+            fseek(archive, write_index, SEEK_SET);
+            fwrite(&file_info, sizeof(FileInfo), 1, archive);
+
+            // Mover los datos del archivo
+            char *buffer = malloc(file_info.file_size);
+            fseek(archive, read_index + sizeof(FileInfo), SEEK_SET);
+            fread(buffer, file_info.file_size, 1, archive);
+            
+            fseek(archive, write_index + sizeof(FileInfo), SEEK_SET);
+            fwrite(buffer, file_info.file_size, 1, archive);
+            free(buffer);
+
+            // Ajustar el índice de escritura
+            write_index += sizeof(FileInfo) + file_info.file_size;
+        }
+        read_index += sizeof(FileInfo) + file_info.file_size;
+    }
+    // Truncar el archivo
+    ftruncate(fileno(archive), write_index);
+    // Actualizar metadatos
+    metadata.total_size = write_index;
+    fseek(archive, 0, SEEK_SET);
+    fwrite(&metadata, sizeof(ArchiveMetadata), 1, archive);
+    fclose(archive);
+
+}
+
+
+int main(int argc, char *argv[]) {
+    int option;
+    char *archive_name = NULL;
+    bool verbose_flag = false;
+
+    while ((option = getopt(argc, argv, "cx:t:du:r:pf:v")) != -1) {
+        switch (option) {
+            case 'c':
+                archive_name = optarg;
+                create(archive_name, &argv[optind], argc - optind);
+                break;
+            case 'x':
+                archive_name = optarg;
+                extract(archive_name, argv[optind]);
+                break;
+            case 't':
+                archive_name = optarg;
+                list(archive_name);
+                break;
+            case 'd':
+                archive_name = optarg;
+                delete(archive_name, argv[optind]);
+                break;
+            /*case 'u':
+                archive_name = optarg;
+                update(archive_name, &argv[optind], argc - optind);
+                break;
+            case 'r':
+                archive_name = optarg;
+                append(archive_name, &argv[optind], argc - optind);
+                break;*/
+            case 'p':
+                archive_name = optarg;
+                defragment(archive_name);
+                break;
+            case 'v':
+                if (verbose_flag) {
+                    verbose_level = VERBOSE_DETAILED;
+                } else {
+                    verbose_level = VERBOSE_SIMPLE;
+                    verbose_flag = true;
+                }
+                break;
+            case 'f':
+                archive_name = optarg;
+                break;
+            default:
+                printf("Opción desconocida: %c\n", option);
+                return 1;
+        }
+    }
+
+    if (!archive_name) {
+        printf("Error: No se especificó el archivo de salida.\n");
+        return 1;
+    }
+
     return 0;
 }
