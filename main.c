@@ -645,77 +645,124 @@ void update(
     //Archivo existe en comprimido, removerlo
 
 }
+// auxiliar functions for main
 
-int main() {
-    char *files[] = {"text1.txt", "text2.txt"};
+//show valid optiones function
+void showValidOptions ( ) {
+    printf("Opciones principales:\n");
+    printf("\t-c, --create : crea un nuevo archivo\n");
+    printf("\t-x, --extract : extraer de un archivo\n");
+    printf("\t-t, --list: listar los contenidos de un archivo\n");
+    printf("\t--delete: borrar desde un archivo\n");
+    printf("\t-u, --update: actualiza el contenido del archivo\n");
+    printf("\t-v, --verbose: ver un reporte de las acciones a medida que se van realizando\n");
+    printf("\t-f, --file: empacar contenidos de archivo, si no está presente asume la entrada estándar.\n");
+    printf("\t-r, --append: agrega contenido a un archivo\n");
+    printf("\t-p, --pack: desfragmenta el contenido del archivo\n");
+}
 
-    //create("archive.tar", files, 2);
-    //list("archive.tar");
-    //extract("archive.tar", "text2.txt");
-    //delete("archive.bin", "file1.txt");
-
-    //update("archive.tar","text3.txt");
-    
-    extractAll("archive.tar");
-    return 0;
-/*
 int main(int argc, char *argv[]) {
-    int option;
-    char *archive_name = NULL;
-    bool verbose_flag = false;
+    int options_count = 0;
+    int optionsLenght;
+    char *archive_name;
+    char **files_name;
+    int num_files;
 
-    while ((option = getopt(argc, argv, "cx:t:du:r:pf:v")) != -1) {
-        switch (option) {
-            case 'c':
-                archive_name = optarg;
-                create(archive_name, &argv[optind], argc - optind);
-                break;
-            case 'x':
-                archive_name = optarg;
-                extract(archive_name, argv[optind]);
-                break;
-            case 't':
-                archive_name = optarg;
-                list(archive_name);
-                break;
-            case 'd':
-                archive_name = optarg;
-                delete(archive_name, argv[optind]);
-                break;
-            case 'u':
-                archive_name = optarg;
-                update(archive_name, &argv[optind], argc - optind);
-                break;
-            case 'r':
-                archive_name = optarg;
-                append(archive_name, &argv[optind], argc - optind);
-                break;*/
- /*           case 'p':
-                archive_name = optarg;
-                defragment(archive_name);
-                break;
-            case 'v':
-                if (verbose_flag) {
-                    verbose_level = VERBOSE_DETAILED;
-                } else {
-                    verbose_level = VERBOSE_SIMPLE;
-                    verbose_flag = true;
-                }
-                break;
-            case 'f':
-                archive_name = optarg;
-                break;
-            default:
-                printf("Opción desconocida: %c\n", option);
-                return 1;
-        }
-    }
-
-    if (!archive_name) {
-        printf("Error: No se especificó el archivo de salida.\n");
+    // Verificar la cantidad adecuada de parámetros
+    if (argc < 3) {
+        printf("Uso: ./star <opciones> <archivoSalida> <archivo1> <archivo2> ... <archivoN>\n");
         return 1;
     }
 
-    return 0; 
-*/
+    for (int i = 1; i < argc; i++) {
+        if (argv[i][0] != '-') break;
+
+        if (argv[i][1] != '-') {
+            optionsLenght = strlen(argv[i]);
+
+            for (int j = 0; j < optionsLenght; j++) {
+                if (argv[i][j] == 'v') {
+                    if (verbose_level == VERBOSE_NONE) {
+                        verbose_level = VERBOSE_SIMPLE;
+                    } else if (verbose_level == VERBOSE_SIMPLE) {
+                        verbose_level = VERBOSE_DETAILED;
+                    }
+                }
+            }
+        }
+        if (strcmp(argv[i], "--verbose") == 0) {
+            if (verbose_level == VERBOSE_NONE) {
+                verbose_level = VERBOSE_SIMPLE;
+            } else if (verbose_level == VERBOSE_SIMPLE) {
+                verbose_level = VERBOSE_DETAILED;
+            }
+        }
+        options_count++;
+    }
+    if(argc < options_count + 2){
+        printf("Uso: ./star <opciones> <archivoSalida> <archivo1> <archivo2> ... <archivoN>\n");
+        return 1;
+    }
+    //get file name
+    archive_name = argv[options_count + 1];
+    //get files name
+    files_name = &argv[options_count + 2];
+    //get number of files
+    num_files = argc - options_count - 2;
+
+    //actions
+    for(int i = 0; i < options_count; i++){
+       if (argv[i+1][1] == '-'){
+            if (strcmp(argv[i+1], "--create") == 0) {
+                printf("create\n");
+            } else if (strcmp(argv[i+1], "--extract") == 0){
+                printf("extract\n");
+            } else if (strcmp(argv[i+1], "--list") == 0){
+                printf("list\n");
+            } else if (strcmp(argv[i+1], "--delete") == 0){
+                printf("delete\n");
+            } else if (strcmp(argv[i+1], "--update") == 0){
+                printf("update\n");
+            } else if (strcmp(argv[i+1], "--append") == 0){
+                printf("append\n");
+            } else if (strcmp(argv[i+1], "--pack") == 0){
+                printf("pack\n");
+            }else if(strcmp(argv[i+1], "--help")==0){
+                printf("help\n");
+            } else {
+                printf("Opción no válida: %s\n", argv[i+1]);
+                printf("Para ver una lista de comandos disponibles, ingrese --help.\n");
+            }
+        } else {
+            for (int j = 1; j < optionsLenght; j++) {
+                switch (argv[i+1][j]){
+                    case 'c':
+                        printf("create\n");
+                        break;
+                    case 'x':
+                        printf("extract\n");
+                        break;
+                    case 't':
+                        printf("list\n");
+                        break;
+                    case 'u':
+                        printf("update\n");
+                        break;
+                    case 'r':
+                        printf("pack\n");
+                        break;
+                    case 'v':
+                        printf("verbose\n");
+                        break;
+                    case 'p':
+                        printf("append\n");
+                        break;
+                    default:
+                        printf("Opción no válida: %c\n", argv[i+1][j]);
+                        printf("Para ver una lista de comandos disponibles, ingrese --help.\n");
+                        break;
+                }
+            }
+        }
+    }
 }
