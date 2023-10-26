@@ -8,7 +8,6 @@
 #include <sys/stat.h>
 #include <dirent.h>
 
-
 typedef enum {
     ACTIVE,
     DELETED
@@ -135,21 +134,34 @@ void create(
         printf("Error al abrir el archivo %s\n", archive_name);
         return;
     }
+    if (verbose_level >= VERBOSE_SIMPLE) {
+        printf("\tArchivo %s abierto con éxito.\n", archive_name);
+    }
     // Escribir metadata
     ArchiveMetadata metadata = {num_files, 0};
     fwrite(&metadata, sizeof(ArchiveMetadata), 1, archive);
-
+    if (verbose_level >= VERBOSE_DETAILED) {
+        printf("\tMetadata escrito en el archivo.\n");
+    }
     // Escribir información de archivos
     for (int i = 0; i < num_files; i++) {
         FILE *file = fopen(files[i], "rb");
         if (!file) {
             printf("Error al abrir el archivo %s\n", files[i]);
-            continue;;
+            return;
         }
+        if (verbose_level >= VERBOSE_SIMPLE) {
+            printf("\tArchivo %s abierto para lectura.\n", files[i]);
+        }
+
         // Obtener tamaño del archivo
         fseek(file, 0, SEEK_END);
         int file_size = ftell(file);
         fseek(file, 0, SEEK_SET);
+        if (verbose_level >= VERBOSE_DETAILED) {
+            printf("\tTamaño del archivo %s: %d bytes.\n", files[i], file_size);
+        }
+
         // Escribir información de archivo
         FileInfo file_info;
         strncpy(file_info.filename, files[i], 255);
@@ -157,16 +169,26 @@ void create(
         file_info.file_size = file_size;
         file_info.status = ACTIVE;
         file_info.start_position = ftell(archive) + sizeof(FileInfo);
-        printf("file_info.start_position: %d\n", file_info.start_position);
         //print size of fileinfo
         fwrite(&file_info, sizeof(FileInfo), 1, archive);
+        if (verbose_level >= VERBOSE_DETAILED) {
+            printf("\tInformación del archivo %s escrita en el archivo de destino.\n", files[i]);
+        }
+
         // Escribir contenido del archivo
         char *buffer = malloc(file_size);
         fread(buffer, file_size, 1, file);
         fwrite(buffer, file_size, 1, archive);
+        if (verbose_level >= VERBOSE_SIMPLE) {
+            printf("\tContenido del archivo %s escrito en el archivo de destino.\n", files[i]);
+        }
+
         // Liberar memoria
         free(buffer);
         fclose(file);
+    }
+    if (verbose_level >= VERBOSE_SIMPLE) {
+        printf("\tArchivo %s cerrado con éxito.\n", archive_name);
     }
     // Cerrar archivo
     fclose(archive);
@@ -648,18 +670,28 @@ void update(
 // auxiliar functions for main
 
 //show valid optiones function
-void showValidOptions ( ) {
+void showValidOptions() {
+    printf("Uso: ./star <opciones> <archivoSalida> <archivo1> <archivo2> ... <archivoN>\n\n");
+    printf("Descripción: Esta herramienta permite realizar diferentes operaciones sobre archivos, tales como crear, extraer, listar y actualizar. A continuación, se presentan las opciones disponibles:\n\n");
+
     printf("Opciones principales:\n");
-    printf("\t-c, --create : crea un nuevo archivo\n");
-    printf("\t-x, --extract : extraer de un archivo\n");
-    printf("\t-t, --list: listar los contenidos de un archivo\n");
-    printf("\t--delete: borrar desde un archivo\n");
-    printf("\t-u, --update: actualiza el contenido del archivo\n");
-    printf("\t-v, --verbose: ver un reporte de las acciones a medida que se van realizando\n");
-    printf("\t-f, --file: empacar contenidos de archivo, si no está presente asume la entrada estándar.\n");
-    printf("\t-r, --append: agrega contenido a un archivo\n");
-    printf("\t-p, --pack: desfragmenta el contenido del archivo\n");
+    printf("\t-c, --create : Crea un nuevo archivo comprimido con los archivos especificados.\n");
+    printf("\t-x, --extract : Extrae los contenidos de un archivo comprimido a la ubicación actual.\n");
+    printf("\t-t, --list : Lista los contenidos de un archivo comprimido, mostrando detalles de cada archivo contenido.\n");
+    printf("\t--delete : Borra un archivo o archivos específicos dentro de un archivo comprimido.\n");
+    printf("\t-u, --update : Actualiza el contenido del archivo comprimido con nuevos archivos o versiones de archivos existentes.\n");
+    printf("\t-v, --verbose : Proporciona un reporte detallado de las acciones que se están realizando. Use -v para un reporte básico y -vv para un reporte detallado.\n");
+    printf("\t-f, --file : Empaca el contenido de un archivo específico. Si esta opción no está presente, la herramienta asumirá que la entrada proviene de la entrada estándar.\n");
+    printf("\t-r, --append : Agrega contenido a un archivo comprimido sin eliminar o modificar el contenido existente.\n");
+    printf("\t-p, --pack : Desfragmenta el contenido del archivo comprimido, eliminando espacios vacíos y optimizando el almacenamiento.\n\n");
+
+    printf("Ejemplos de uso:\n");
+    printf("\t./star -c archivoSalida.tar archivo1.txt archivo2.txt\n");
+    printf("\t./star --list archivoSalida.tar\n");
+    printf("\t./star -v --delete archivoSalida.tar archivo1.txt\n");
+
 }
+
 
 int main(int argc, char *argv[]) {
     int options_count = 0;
@@ -669,6 +701,11 @@ int main(int argc, char *argv[]) {
     int num_files;
 
     // Verificar la cantidad adecuada de parámetros
+    //if --help is present
+    if (argc == 2 && strcmp(argv[1], "--help") == 0) {
+        showValidOptions();
+        return 0;
+    }
     if (argc < 3) {
         printf("Uso: ./star <opciones> <archivoSalida> <archivo1> <archivo2> ... <archivoN>\n");
         return 1;
@@ -714,7 +751,7 @@ int main(int argc, char *argv[]) {
     for(int i = 0; i < options_count; i++){
        if (argv[i+1][1] == '-'){
             if (strcmp(argv[i+1], "--create") == 0) {
-                printf("create\n");
+                create(archive_name, files_name, num_files);
             } else if (strcmp(argv[i+1], "--extract") == 0){
                 printf("extract\n");
             } else if (strcmp(argv[i+1], "--list") == 0){
@@ -728,7 +765,7 @@ int main(int argc, char *argv[]) {
             } else if (strcmp(argv[i+1], "--pack") == 0){
                 printf("pack\n");
             }else if(strcmp(argv[i+1], "--help")==0){
-                printf("help\n");
+                showValidOptions();
             } else {
                 printf("Opción no válida: %s\n", argv[i+1]);
                 printf("Para ver una lista de comandos disponibles, ingrese --help.\n");
@@ -738,6 +775,7 @@ int main(int argc, char *argv[]) {
                 switch (argv[i+1][j]){
                     case 'c':
                         printf("create\n");
+                        create(archive_name, files_name, num_files);
                         break;
                     case 'x':
                         printf("extract\n");
@@ -765,4 +803,17 @@ int main(int argc, char *argv[]) {
             }
         }
     }
+    //print verbose level
+    switch (verbose_level) {
+        case VERBOSE_NONE:
+            printf("Nivel de detalle: Ninguno\n");
+            break;
+        case VERBOSE_SIMPLE:
+            printf("Nivel de detalle: Simple\n");
+            break;
+        case VERBOSE_DETAILED:
+            printf("Nivel de detalle: Detallado\n");
+            break;
+    }
+    return 0;
 }
