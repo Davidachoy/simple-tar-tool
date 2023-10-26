@@ -207,6 +207,10 @@ void list(
     // Leer metadata
     ArchiveMetadata metadata;
     fread(&metadata, sizeof(ArchiveMetadata), 1, archive);
+    if (verbose_level >= VERBOSE_SIMPLE) {
+        printf("\tLeyendo metadata del archivo...\n");
+        printf("\tNúmero total de archivos en el archivo comprimido: %d\n", metadata.num_files);
+    }
 
     //listar archivos
     for (int i = 0; i < metadata.num_files; i++) {
@@ -215,12 +219,20 @@ void list(
         fread(&file_info, sizeof(FileInfo), 1, archive);
         // Imprimir nombre de archivo
         if (file_info.status == ACTIVE) {
-            printf("%s\n", file_info.filename);
+            printf("\tArchivo: %s\n", file_info.filename);
+            if (verbose_level == VERBOSE_DETAILED) {
+                printf("\tTamaño del archivo: %d bytes\n", file_info.file_size);
+                printf("\tPosición de inicio en el archivo comprimido: %d\n", file_info.start_position);
+            }
         }
         // Saltar contenido de archivo
         fseek(archive, file_info.file_size, SEEK_CUR);
     }
     fclose(archive);
+
+    if (verbose_level >= VERBOSE_SIMPLE) {
+        printf("\tOperación de listar completada exitosamente.\n");
+    }
 }
 
 // extract function
@@ -701,7 +713,6 @@ int main(int argc, char *argv[]) {
     int num_files;
 
     // Verificar la cantidad adecuada de parámetros
-    //if --help is present
     if (argc == 2 && strcmp(argv[1], "--help") == 0) {
         showValidOptions();
         return 0;
@@ -717,7 +728,12 @@ int main(int argc, char *argv[]) {
         if (argv[i][1] != '-') {
             optionsLenght = strlen(argv[i]);
 
-            for (int j = 0; j < optionsLenght; j++) {
+            for (int j = 1; j < optionsLenght; j++) {
+                 if (!(strchr("cvxturp", argv[i][j]))) {
+                    printf("Opción no válida: %c\n", argv[i][j]);
+                    printf("Para ver una lista de comandos disponibles, ingrese --help.\n");
+                    return 1;
+                }
                 if (argv[i][j] == 'v') {
                     if (verbose_level == VERBOSE_NONE) {
                         verbose_level = VERBOSE_SIMPLE;
@@ -751,11 +767,14 @@ int main(int argc, char *argv[]) {
     for(int i = 0; i < options_count; i++){
        if (argv[i+1][1] == '-'){
             if (strcmp(argv[i+1], "--create") == 0) {
+                printf("create\n");
                 create(archive_name, files_name, num_files);
             } else if (strcmp(argv[i+1], "--extract") == 0){
                 printf("extract\n");
             } else if (strcmp(argv[i+1], "--list") == 0){
                 printf("list\n");
+                list(archive_name);
+
             } else if (strcmp(argv[i+1], "--delete") == 0){
                 printf("delete\n");
             } else if (strcmp(argv[i+1], "--update") == 0){
@@ -782,6 +801,7 @@ int main(int argc, char *argv[]) {
                         break;
                     case 't':
                         printf("list\n");
+                        list(archive_name);
                         break;
                     case 'u':
                         printf("update\n");
@@ -790,7 +810,6 @@ int main(int argc, char *argv[]) {
                         printf("pack\n");
                         break;
                     case 'v':
-                        printf("verbose\n");
                         break;
                     case 'p':
                         printf("append\n");
