@@ -5,6 +5,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdbool.h>
+#include <sys/stat.h>
+
 
 typedef enum {
     ACTIVE,
@@ -45,7 +47,7 @@ void create(const char *archive_name, char *files[], int num_files);
 void extract(const char *archive_name, const char *file_name);
 void list(const char *archive_name);
 void delete(char *archive_name, const char *file_to_delete);
-void update (char *archive_name, char *files[], int num_files);
+void update (const char *archive_name, const char *file_name);
 void append(char *archive_name, char *files[], int num_files);
 void defragment(char *archive_name);
 void verbose(char *archive_name);
@@ -308,6 +310,7 @@ void list_free_spaces(const char *archive_name) {
 void defragment(
     char *archive_name
 ) {
+
     FILE *archive = fopen(archive_name, "rb+");
     if (!archive) {
         printf("Error al abrir el archivo %s\n", archive_name);
@@ -356,7 +359,84 @@ void defragment(
 
 }
 
+void extractAll(
+    const char *archive_name
+) {
+    // Abrir el archivo tar
+    FILE *archive = fopen(archive_name, "rb");
+    if (!archive) {
+        printf("Error al abrir el archivo %s\n", archive_name);
+        return;
+    }
 
+    ArchiveMetadata metadata;
+    fread(&metadata, sizeof(ArchiveMetadata), 1, archive);
+
+    // Recorrer y extraer todos los archivos
+    for (int i = 0; i < metadata.num_files; i++) {
+        FileInfo file_info;
+        fread(&file_info, sizeof(FileInfo), 1, archive);
+
+        // Verificar si el archivo está activo
+        if (file_info.status == ACTIVE) {
+            FILE *output = fopen(file_info.filename, "wb");
+            if (!output) {
+                printf("Error al abrir el archivo %s\n", file_info.filename);
+            } else {
+                // Leer y escribir el contenido del archivo
+                fseek(archive, file_info.start_position, SEEK_SET);
+                char buffer[1024];
+                int bytes_left = file_info.file_size;
+
+                while (bytes_left > 0) {
+                    int bytes_to_read = bytes_left < sizeof(buffer) ? bytes_left : sizeof(buffer);
+                    fread(buffer, bytes_to_read, 1, archive);
+                    fwrite(buffer, bytes_to_read, 1, output);
+                    bytes_left -= bytes_to_read;
+                }
+
+                fclose(output);
+                printf("Archivo extraído: %s\n", file_info.filename);
+            }
+        }
+    }
+
+    // Cerrar el archivo tar
+    fclose(archive);
+}
+
+void update(
+    const char *archive_name, 
+    const char *file_name
+) {
+
+    extractAll("archive.bin");
+
+    //El Archivo no existe en el comprimido
+    //if(){
+
+    //}
+
+    //Archivo existe en comprimido, no ha cambiado
+
+    //Archivo existe en comprimido, ha cambiado
+
+    //Archivo existe en comprimido, removerlo
+
+}
+
+int main() {
+    char *files[] = {"text1.txt", "text2.txt"};
+
+    //create("archive.tar", files, 2);
+    //list("archive.tar");
+    //extract("archive.tar", "text2.txt");
+    //delete("archive.bin", "file1.txt");
+
+    //update("file1.txt","archive.tar");
+    extractAll("archive.tar");
+    return 0;
+/*
 int main(int argc, char *argv[]) {
     int option;
     char *archive_name = NULL;
@@ -380,7 +460,7 @@ int main(int argc, char *argv[]) {
                 archive_name = optarg;
                 delete(archive_name, argv[optind]);
                 break;
-            /*case 'u':
+            case 'u':
                 archive_name = optarg;
                 update(archive_name, &argv[optind], argc - optind);
                 break;
@@ -388,7 +468,7 @@ int main(int argc, char *argv[]) {
                 archive_name = optarg;
                 append(archive_name, &argv[optind], argc - optind);
                 break;*/
-            case 'p':
+ /*           case 'p':
                 archive_name = optarg;
                 defragment(archive_name);
                 break;
@@ -414,5 +494,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    return 0;
+    return 0; 
+*/
 }
