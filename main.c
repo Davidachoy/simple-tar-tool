@@ -771,6 +771,7 @@ int main(int argc, char *argv[]) {
                 create(archive_name, files_name, num_files);
             } else if (strcmp(argv[i+1], "--extract") == 0){
                 printf("extract\n");
+                extractAll(archive_name);
             } else if (strcmp(argv[i+1], "--list") == 0){
                 printf("list\n");
                 list(archive_name);
@@ -798,6 +799,7 @@ int main(int argc, char *argv[]) {
                         break;
                     case 'x':
                         printf("extract\n");
+                        extractAll(archive_name);
                         break;
                     case 't':
                         printf("list\n");
