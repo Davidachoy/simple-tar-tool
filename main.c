@@ -47,7 +47,7 @@ void create(const char *archive_name, char *files[], int num_files);
 void extract(const char *archive_name, const char *file_name);
 void list(const char *archive_name);
 void delete(char *archive_name, const char *file_to_delete);
-void update (const char *archive_name, const char *file_name);
+void update (const char *archive_name, char *files[] , int num_files);
 void append(char *archive_name, char *files[], int num_files);
 void defragment(char *archive_name);
 void verbose(char *archive_name);
@@ -501,8 +501,6 @@ int archivoExisteEnCarpeta(const char *archive, const char *file) {
     }
 }
 
-
-
 void createFromFolderAndFile(const char *archive_name, const char *folder_name, const char *additional_file) {
     // Abrir el archivo .tar
     FILE *archive = fopen(archive_name, "wb");
@@ -646,38 +644,21 @@ int eliminarCarpetaRecursiva(const char *carpeta) {
 
 void update(
     const char *archive_name, 
-    const char *file_name
+    char *files[],  
+    int num_files
 ) {
     //crea un folder con los archivos
     mkdir("temporal", 0777);
     extractAllToFolder(archive_name, "temporal");
-    remove(archive_name);
+    //remove(archive_name);
 
-    int existe= archivoExisteEnCarpeta("temporal", file_name);
-    
-    if(existe){
-        printf("todo\n");
-        remove("temporal");
-    }else{
-        //si no existe en el .tar
-        //se agrega al final
-
-        createFromFolderAndFile(archive_name, "temporal", file_name);
+     for (int i = 0; i < num_files; i++) {
+        int existe = archivoExisteEnCarpeta("temporal", files[i]);
+        createFromFolderAndFile(archive_name, "temporal", files[i]);
+        printf("Agregado: %s\n", files[i]);
         eliminarCarpetaRecursiva("./temporal");
-
-        printf("Agregado");
+        remove("./temporal");
     }
-    //El Archivo no existe en el comprimido
-    //if(){
-
-    //}
-
-    //Archivo existe en comprimido, no ha cambiado
-
-    //Archivo existe en comprimido, ha cambiado
-
-    //Archivo existe en comprimido, removerlo
-
 }
 // auxiliar functions for main
 
@@ -780,6 +761,7 @@ int main(int argc, char *argv[]) {
                 printf("delete\n");
             } else if (strcmp(argv[i+1], "--update") == 0){
                 printf("update\n");
+                update(archive_name, files_name, num_files);
             } else if (strcmp(argv[i+1], "--append") == 0){
                 printf("append\n");
             } else if (strcmp(argv[i+1], "--pack") == 0){
@@ -807,6 +789,8 @@ int main(int argc, char *argv[]) {
                         break;
                     case 'u':
                         printf("update\n");
+                        update(archive_name, files_name, num_files);
+                        printf("updated.\n");
                         break;
                     case 'r':
                         printf("pack\n");
