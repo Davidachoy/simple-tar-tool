@@ -788,7 +788,7 @@ int eliminarCarpetaRecursiva(const char *carpeta) {
 
     return resultado;
 }
-
+/*
 void update(const char *archive_name, const char *file_to_update) {
     FILE *archive = fopen(archive_name, "rb+");
     if (!archive) {
@@ -841,6 +841,76 @@ void update(const char *archive_name, const char *file_to_update) {
     printf("El archivo %s ha sido actualizado.\n", file_to_update);
 }
 // auxiliar functions for main
+*/
+
+void update(const char *archive_name, const char *file_to_update) {
+    FILE *archive = fopen(archive_name, "rb+");
+    if (!archive) {
+        printf("Error al abrir el archivo %s\n", archive_name);
+        return;
+    }
+
+    // Buscar el archivo a actualizar
+    FileInfo file_info;
+    if (!find_file_info(archive, file_to_update, &file_info)) {
+        printf("El archivo %s no fue encontrado en el archivo.\n", file_to_update);
+        fclose(archive);
+        return;
+    }
+
+    if (file_info.status == DELETED) {
+        printf("El archivo %s está marcado como borrado y no se puede actualizar.\n", file_to_update);
+        fclose(archive);
+        return;
+    }
+
+    // Abrir el nuevo archivo para obtener su contenido
+    FILE *new_file_ptr = fopen(file_to_update, "rb");
+    if (!new_file_ptr) {
+        printf("Error al abrir el archivo %s\n", file_to_update);
+        fclose(archive);
+        return;
+    }
+
+    // Calcular el tamaño del nuevo contenido
+    fseek(new_file_ptr, 0, SEEK_END);
+    size_t new_content_size = ftell(new_file_ptr);
+    fseek(new_file_ptr, 0, SEEK_SET);
+
+    // Verificar que el nuevo contenido quepa en el espacio original del archivo
+    if (new_content_size > file_info.file_size) {
+        printf("El nuevo contenido es demasiado grande para el archivo existente.\n");
+        fclose(archive);
+        fclose(new_file_ptr);
+        return;
+    }
+
+    // Posicionarse en el inicio del archivo a actualizar
+    fseek(archive, file_info.start_position, SEEK_SET);
+
+    // Leer el nuevo contenido y escribirlo en el archivo TAR
+    char buffer[1024];
+    size_t bytes_read;
+    size_t bytes_written = 0;
+
+    while ((bytes_written < new_content_size) && (bytes_read = fread(buffer, 1, sizeof(buffer), new_file_ptr) > 0)) {
+        size_t bytes_to_write = (bytes_written + bytes_read <= new_content_size) ? bytes_read : new_content_size - bytes_written;
+        fwrite(buffer, 1, bytes_to_write, archive);
+        bytes_written += bytes_to_write;
+    }
+
+    // Si el nuevo contenido es más corto que el original, llenar el espacio restante con caracteres nulos
+    while (bytes_written < new_content_size) {
+        char null_buffer[1024] = {0};
+        size_t bytes_to_write = (bytes_written + sizeof(null_buffer) <= new_content_size) ? sizeof(null_buffer) : new_content_size - bytes_written;
+        fwrite(null_buffer, 1, bytes_to_write, archive);
+        bytes_written += bytes_to_write;
+    }
+
+    fclose(archive);
+    fclose(new_file_ptr);
+    printf("El archivo %s ha sido actualizado.\n", file_to_update);
+}
 
 //show valid optiones function
 void showValidOptions() {
