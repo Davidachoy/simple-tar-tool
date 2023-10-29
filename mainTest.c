@@ -52,7 +52,7 @@ void create(const char *archive_name, char *files[], int num_files); // create f
 void extract(const char *archive_name, const char *file_name); // extract function                     
 void list(const char *archive_name); // list function
 void delete(const char *archive_name, const char *file_to_delete); // delete function 
-void update (const char *archive_name, char *files[] , int num_files);// update function
+void update (const char *archive_name, const char *file_to_update);// update function
 void append(char *archive_name, char *files[], int num_files); // append function
 void defragment(char *archive_name); // defragment function
 void verbose(char *archive_name); // verbose function
@@ -789,23 +789,56 @@ int eliminarCarpetaRecursiva(const char *carpeta) {
     return resultado;
 }
 
-void update(
-    const char *archive_name, 
-    char *files[],  
-    int num_files
-) {
-    //crea un folder con los archivos
-    mkdir("temporal", 0777);
-    extractAllToFolder(archive_name, "temporal");
-    //remove(archive_name);
-
-     for (int i = 0; i < num_files; i++) {
-        int existe = archivoExisteEnCarpeta("temporal", files[i]);
-        createFromFolderAndFile(archive_name, "temporal", files[i]);
-        printf("Agregado: %s\n", files[i]);
-        eliminarCarpetaRecursiva("./temporal");
-        remove("./temporal");
+void update(const char *archive_name, const char *file_to_update) {
+    FILE *archive = fopen(archive_name, "rb+");
+    if (!archive) {
+        printf("Error al abrir el archivo %s\n", archive_name);
+        return;
     }
+
+    // Buscar el archivo a actualizar
+    FileInfo file_info;
+    if (!find_file_info(archive, file_to_update, &file_info)) {
+        printf("El archivo %s no fue encontrado en el archivo.\n", file_to_update);
+        fclose(archive);
+        return;
+    }
+
+    if (file_info.status == DELETED) {
+        printf("El archivo %s está marcado como borrado y no se puede actualizar.\n", file_to_update);
+        fclose(archive);
+        return;
+    }
+
+    // Abrir el nuevo archivo para obtener su contenido
+    FILE *new_file_ptr = fopen(file_to_update, "rb");
+    if (!new_file_ptr) {
+        printf("Error al abrir el archivo %s\n", file_to_update);
+        fclose(archive);
+        return;
+    }
+
+    // Calcular el tamaño del nuevo contenido
+    fseek(new_file_ptr, 0, SEEK_END);
+    size_t new_content_size = ftell(new_file_ptr);
+    fseek(new_file_ptr, 0, SEEK_SET);
+
+    // Verificar que el nuevo contenido quepa en el espacio original del archivo
+    if (new_content_size > file_info.file_size) {
+        printf("El nuevo contenido es demasiado grande para el archivo existente.\n");
+        fclose(archive);
+        fclose(new_file_ptr);
+        return;
+    }
+
+    // Actualizar el contenido del archivo con el nuevo contenido
+    fseek(archive, file_info.start_position, SEEK_SET);
+    fread(file_to_update, 1, new_content_size, new_file_ptr);
+    fwrite(file_to_update, 1, new_content_size, archive);
+
+    fclose(archive);
+    fclose(new_file_ptr);
+    printf("El archivo %s ha sido actualizado.\n", file_to_update);
 }
 // auxiliar functions for main
 
@@ -908,7 +941,7 @@ int main(int argc, char *argv[]) {
                 delete(archive_name, files_name[0]);
             } else if (strcmp(argv[i+1], "--update") == 0){
                 printf("update\n");
-                update(archive_name, files_name, num_files);
+                update(archive_name, files_name[0]);
             } else if (strcmp(argv[i+1], "--append") == 0){
                 printf("append\n");
             } else if (strcmp(argv[i+1], "--pack") == 0){
@@ -936,7 +969,7 @@ int main(int argc, char *argv[]) {
                         break;
                     case 'u':
                         printf("update\n");
-                        update(archive_name, files_name, num_files);
+                        update(archive_name, files_name[0]);
                         printf("updated.\n");
                         break;
                     case 'r':
