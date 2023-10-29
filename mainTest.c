@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 #include <dirent.h>
 
+#define MAX_FREE_SPACES 100  // Puede ser cualquier valor que consideres adecuado
+
 // file status enum for file info
 typedef enum {
     ACTIVE,
@@ -46,10 +48,10 @@ typedef struct {
 
 
 // Function Prototypes
-void create(const char *archive_name, char *files[], int num_files); // create function                VERBOSE
+void create(const char *archive_name, char *files[], int num_files); // create function            
 void extract(const char *archive_name, const char *file_name); // extract function                     
 void list(const char *archive_name); // list function
-void delete(char *archive_name, const char *file_to_delete); // delete function 
+void delete(const char *archive_name, const char *file_to_delete); // delete function 
 void update (const char *archive_name, char *files[] , int num_files);// update function
 void append(char *archive_name, char *files[], int num_files); // append function
 void defragment(char *archive_name); // defragment function
@@ -58,40 +60,122 @@ void verbose(char *archive_name); // verbose function
 bool find_file_info(FILE *archive, const char *file_name, FileInfo *file_info); // auxiliary function
 void mark_free_space(FILE *archive, int start_position, int size); // auxiliary function
 
+void print_free_spaces(const char *archive_name) {
+    // Abrir archivo
+    FILE *archive = fopen(archive_name, "rb");
+    if (!archive) {
+        printf("Error al abrir el archivo %s\n", archive_name);
+        return;
+    }
+
+    // Leer el número inicial de espacios libres
+    int num_free_spaces;
+    fread(&num_free_spaces, sizeof(int), 1, archive);
+    printf("Número total de espacios libres: %d\n", num_free_spaces);
+
+    // Leer y listar la información de los espacios libres
+    for (int i = 0; i < num_free_spaces; i++) {
+        FreeSpaceInfo free_space;
+        if (fread(&free_space, sizeof(FreeSpaceInfo), 1, archive) != 1) {
+            printf("Error al leer FreeSpaceInfo en la iteración %d.\n", i);
+            break;
+        }
+
+        printf("Espacio libre %d:\n", i + 1);
+        printf("\tPosición de inicio: %d\n", free_space.start_position);
+        printf("\tTamaño: %d bytes\n", free_space.size);
+    }
+
+    fclose(archive);
+}
+void update_num_free_spaces(FILE *archive, int num_free_spaces) {
+    fseek(archive, 0, SEEK_SET);  // Vuelve al inicio del archivo
+    fwrite(&num_free_spaces, sizeof(int), 1, archive); // Escribe el valor actualizado
+}
+
+
+void load_free_spaces(FILE *archive, FreeSpaceInfo free_spaces[MAX_FREE_SPACES]) {
+    // Posicionarse al inicio donde están los espacios libres.
+    fseek(archive, sizeof(int), SEEK_SET);
+    fread(free_spaces, sizeof(FreeSpaceInfo), MAX_FREE_SPACES, archive);
+}
+void save_free_spaces(FILE *archive, FreeSpaceInfo free_spaces[MAX_FREE_SPACES]) {
+    // Posicionarse al inicio donde están los espacios libres.
+    fseek(archive, sizeof(int), SEEK_SET);
+    fwrite(free_spaces, sizeof(FreeSpaceInfo), MAX_FREE_SPACES, archive);
+}
+void insert_and_combine_free_space(FreeSpaceInfo free_spaces[MAX_FREE_SPACES], FreeSpaceInfo new_space) {
+    // Insertar el nuevo espacio libre (esta parte puede mejorarse para mantener la lista ordenada si es necesario)
+    for (int i = 0; i < MAX_FREE_SPACES; i++) {
+        if (free_spaces[i].size == 0) { // Suponiendo que size == 0 indica un espacio no utilizado.
+            free_spaces[i] = new_space;
+            break;
+        }
+    }
+
+    // Combinar espacios adyacentes
+    for (int i = 0; i < MAX_FREE_SPACES - 1; i++) {
+        for (int j = i + 1; j < MAX_FREE_SPACES; j++) {
+            if (free_spaces[i].start_position + free_spaces[i].size == free_spaces[j].start_position) {
+                // Espacios i y j son adyacentes
+                free_spaces[i].size += free_spaces[j].size;
+                free_spaces[j].size = 0; // Marcar como espacio no utilizado
+            } else if (free_spaces[j].start_position + free_spaces[j].size == free_spaces[i].start_position) {
+                // Espacios j e i son adyacentes
+                free_spaces[j].size += free_spaces[i].size;
+                free_spaces[i].size = 0; // Marcar como espacio no utilizado
+            }
+        }
+    }
+}
+
 bool find_file_info (
     FILE *archive, 
     const char *file_name, 
     FileInfo *file_info
 ) {
-    // Posicionarse al inicio del archivo
-    fseek(archive, 0, SEEK_SET);
-    // Leer metadatos
+    // Saltar el número inicial de espacios libres
+    fseek(archive, sizeof(int), SEEK_CUR);
+
+    // Saltar la lista de espacios libres
+    fseek(archive, sizeof(FreeSpaceInfo) * MAX_FREE_SPACES, SEEK_CUR);
+
+    // Leer metadatos del archivo
     ArchiveMetadata metadata;
     if (fread(&metadata, sizeof(ArchiveMetadata), 1, archive) != 1) {
         printf("Error al leer metadatos.\n");
         return false;
     }
-    // Buscar el archivo
+
+    // Buscar el archivo en la lista de archivos
     for (int i = 0; i < metadata.num_files; i++) {
         // Leer información de archivo
         if (fread(file_info, sizeof(FileInfo), 1, archive) != 1) {
             printf("Error al leer FileInfo en la iteración %d.\n", i);
             return false;
         }
+
+        // Mensaje de diagnóstico
+        printf("Buscando: %s, Encontrado: %s\n", file_name, file_info->filename);
+
         // Comparar nombre de archivo
         if (strcmp(file_info->filename, file_name) == 0) {
+            if (file_info->status == DELETED) {
+                printf("El archivo %s fue encontrado pero está marcado como DELETED.\n", file_name);
+                return false; // O true, dependiendo de tu caso de uso
+            }
             return true;
         }
-        // Saltar contenido de archivo
-        if (fseek(archive, file_info->file_size, SEEK_CUR) != 0) {
-            printf("Error al saltar contenido de archivo en la iteración %d.\n", i);
-            return false;
-        }
+
+        // Saltar contenido de archivo para buscar el próximo FileInfo
+        fseek(archive, file_info->file_size, SEEK_CUR);
     }
+
     // No se encontró el archivo
     file_info->filename[0] = '\0';
     return false;
 }
+
 
 void mark_free_space(
     FILE *archive, // Archivo tar
@@ -140,6 +224,17 @@ void create(
     if (verbose_level >= VERBOSE_SIMPLE) {
         printf("\tArchivo %s abierto con éxito.\n", archive_name);
     }
+
+    // Escribir el número inicial de espacios libres (0 al principio)
+    int num_free_spaces = 0;
+    fwrite(&num_free_spaces, sizeof(int), 1, archive);
+
+
+    // Reservar espacio para la lista de espacios libres (por simplicidad, definamos un máximo)
+    FreeSpaceInfo free_spaces[MAX_FREE_SPACES];
+    memset(&free_spaces, 0, sizeof(FreeSpaceInfo) * MAX_FREE_SPACES); // Llenar con ceros
+    fwrite(&free_spaces, sizeof(FreeSpaceInfo), MAX_FREE_SPACES, archive);
+
     // Escribir metadata
     ArchiveMetadata metadata = {num_files, 0};
     fwrite(&metadata, sizeof(ArchiveMetadata), 1, archive);
@@ -196,17 +291,20 @@ void create(
     // Cerrar archivo
     fclose(archive);
 }
-
-// list function
-void list(
-    const char *archive_name
-) {
+void list(const char *archive_name) {
     // Abrir archivo
     FILE *archive = fopen(archive_name, "rb");
     if (!archive) {
         printf("Error al abrir el archivo %s\n", archive_name);
         return;
     }
+
+    // Saltar el número inicial de espacios libres
+    fseek(archive, sizeof(int), SEEK_CUR);
+
+    // Saltar la lista de espacios libres
+    fseek(archive, sizeof(FreeSpaceInfo) * MAX_FREE_SPACES, SEEK_CUR);
+
     // Leer metadata
     ArchiveMetadata metadata;
     fread(&metadata, sizeof(ArchiveMetadata), 1, archive);
@@ -215,28 +313,41 @@ void list(
         printf("\tNúmero total de archivos en el archivo comprimido: %d\n", metadata.num_files);
     }
 
-    //listar archivos
+    int active_files_count = 0;
+
+    // Listar archivos
     for (int i = 0; i < metadata.num_files; i++) {
-        // Leer información de archivo
         FileInfo file_info;
-        fread(&file_info, sizeof(FileInfo), 1, archive);
-        // Imprimir nombre de archivo
+        size_t read = fread(&file_info, sizeof(FileInfo), 1, archive);
+
+        // Si no se pudo leer más data, salir del loop
+        if (read < 1) {
+            break;
+        }
+
+        // Solo listar si el archivo está marcado como ACTIVE
         if (file_info.status == ACTIVE) {
+            active_files_count++;
             printf("\tArchivo: %s\n", file_info.filename);
             if (verbose_level == VERBOSE_DETAILED) {
                 printf("\tTamaño del archivo: %d bytes\n", file_info.file_size);
                 printf("\tPosición de inicio en el archivo comprimido: %d\n", file_info.start_position);
             }
         }
-        // Saltar contenido de archivo
+
+        // Saltar contenido de archivo para llegar al próximo FileInfo
         fseek(archive, file_info.file_size, SEEK_CUR);
     }
+
     fclose(archive);
 
     if (verbose_level >= VERBOSE_SIMPLE) {
+        printf("\tNúmero de archivos activos en el archivo comprimido: %d\n", active_files_count);
         printf("\tOperación de listar completada exitosamente.\n");
     }
 }
+
+
 
 // extract function
 void extract(
@@ -281,45 +392,51 @@ void extract(
     fclose(archive);
     fclose(output);
 }
-
-// delete function
-void delete(
-    char *archive_name, 
-    const char *file_to_delete
-) {
-    // Abrir archivo
+void delete(const char *archive_name, const char *file_to_delete) {
     FILE *archive = fopen(archive_name, "rb+");
     if (!archive) {
         printf("Error al abrir el archivo %s\n", archive_name);
         return;
     }
 
-    // Leer metadata
-    ArchiveMetadata metadata;
-    fread(&metadata, sizeof(ArchiveMetadata), 1, archive);
     // Buscar el archivo
     FileInfo file_info;
-    if (!find_file_info(archive, file_to_delete, &file_info)) {
-        printf("No se encontró el archivo %s\n", file_to_delete);
+    if(!find_file_info(archive, file_to_delete, &file_info)) {
+        printf("El archivo %s no fue encontrado en el archivo.\n", file_to_delete);
         fclose(archive);
         return;
     }
 
-    // Cambiar el estado del archivo a DELETED
+    if(file_info.status == DELETED) {
+        printf("El archivo %s ya estaba marcado como borrado.\n", file_to_delete);
+        fclose(archive);
+        return;
+    }
+
+    // Cambiar el estado a DELETED
     file_info.status = DELETED;
-    // Retroceder la posición actual del archivo para reescribir la información del archivo
-    fseek(archive, -sizeof(FileInfo), SEEK_CUR);
+    fseek(archive, -sizeof(FileInfo), SEEK_CUR); // Regresar para reescribir el FileInfo
     fwrite(&file_info, sizeof(FileInfo), 1, archive);
-    //marcar el espacio como libre
-    mark_free_space(archive, file_info.start_position, file_info.file_size);
 
-    // Reposition cursor to the beginning of the file and write metadata
-    fseek(archive, 0, SEEK_SET);
-    fwrite(&metadata, sizeof(ArchiveMetadata), 1, archive);
+    // Marcar el espacio ocupado por el archivo como espacio libre
+    FreeSpaceInfo new_free_space;
+    new_free_space.start_position = file_info.start_position;
+    new_free_space.size = file_info.file_size;
 
-    // Cerrar archivo
+    FreeSpaceInfo free_spaces[MAX_FREE_SPACES];
+    // Suponiendo que tienes una función para cargar todos los espacios libres existentes:
+    load_free_spaces(archive, free_spaces);
+
+    // Insertar el nuevo espacio libre, y si es posible, combinar con espacios libres adyacentes
+    insert_and_combine_free_space(free_spaces, new_free_space);
+
+    // Suponiendo que tienes una función para guardar todos los espacios libres después de modificarlos:
+    save_free_spaces(archive, free_spaces);
+
     fclose(archive);
+    printf("El archivo %s ha sido marcado como eliminado.\n", file_to_delete);
 }
+
 
 void list_free_spaces(const char *archive_name) {
     FILE *archive = fopen(archive_name, "rb");
@@ -396,7 +513,6 @@ void defragment(
     fclose(archive);
 
 }
-
 void extractAll(
     const char *archive_name // Nombre del archivo tar
 ) {
@@ -409,6 +525,13 @@ void extractAll(
     if (verbose_level >= VERBOSE_SIMPLE) {
         printf("\tArchivo %s abierto con éxito.\n", archive_name);
     }
+
+    // Saltar el número inicial de espacios libres
+    fseek(archive, sizeof(int), SEEK_CUR);
+
+    // Saltar la lista de espacios libres
+    fseek(archive, sizeof(FreeSpaceInfo) * MAX_FREE_SPACES, SEEK_CUR);
+
     ArchiveMetadata metadata;
     fread(&metadata, sizeof(ArchiveMetadata), 1, archive);
     if (verbose_level >= VERBOSE_DETAILED) {
@@ -423,19 +546,18 @@ void extractAll(
         if (verbose_level >= VERBOSE_DETAILED) {
             printf("\tLeyendo información del archivo %d de %d.\n", i+1, metadata.num_files);
         }
+
         // Verificar si el archivo está activo
         if (file_info.status == ACTIVE) {
             FILE *output = fopen(file_info.filename, "wb");
             if (!output) {
                 printf("Error al abrir el archivo %s\n", file_info.filename);
             } else {
-
                 if (verbose_level >= VERBOSE_SIMPLE) {
                     printf("\tArchivo %s abierto para escritura.\n", file_info.filename);
                 }
 
                 // Leer y escribir el contenido del archivo
-                fseek(archive, file_info.start_position, SEEK_SET);
                 char buffer[1024];
                 int bytes_left = file_info.file_size;
 
@@ -451,7 +573,10 @@ void extractAll(
                     printf("\tArchivo extraído: %s\n", file_info.filename);
                 }
             }
-        } 
+        } else {
+            // Si el archivo no está activo, aún debes saltar su contenido para procesar el siguiente archivo
+            fseek(archive, file_info.file_size, SEEK_CUR);
+        }
     }
     if (verbose_level >= VERBOSE_SIMPLE) {
         printf("\tArchivo %s cerrado con éxito.\n", archive_name);
@@ -460,6 +585,7 @@ void extractAll(
     // Cerrar el archivo tar
     fclose(archive);
 }
+
 
 void extractAllToFolder(const char *archive_name, const char *destination_folder) {
     // Abrir el archivo tar
@@ -814,13 +940,13 @@ int main(int argc, char *argv[]) {
                         printf("updated.\n");
                         break;
                     case 'r':
+                        print_free_spaces(archive_name);
                         printf("pack\n");
                         break;
                     case 'v':
                         break;
                     case 'p':
                         printf("append\n");
-                        append(archive_name, files_name, num_files);
                         break;
                     default:
                         printf("Opción no válida: %c\n", argv[i+1][j]);
