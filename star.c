@@ -52,6 +52,9 @@ void list(const char *archive_name); // list function
 void extractAll(const char *archive_name); // extract all function
 void delete(const char *archive_name, const char *file_to_delete); // delete function
 void append(const char *archive_name, const char *file_to_add); // append function
+void pack(const char *archive_name); // pack function
+void defragment(const char *archive_name); // defragment function
+void update(const char *archive_name, const char *file_to_update); // update function
 //auxiliary functions
 bool find_file_info (FILE *archive, const char *file_name, FileInfo *file_info); // find file info function
 void showValidOptions(); // show valid options function
@@ -60,32 +63,44 @@ void save_free_spaces(FILE *archive, FreeSpaceInfo free_spaces[MAX_FREE_SPACES])
 void insert_and_combine_free_space(FreeSpaceInfo free_spaces[MAX_FREE_SPACES], FreeSpaceInfo new_space); // insert and combine free space function
 void print_free_spaces(const char *archive_name); // print free spaces function
 
-void append(const char *archive_name, const char *file_to_add) {
+void update(const char *archive_name, const char *file_to_update) {
     FILE *archive = fopen(archive_name, "rb+");
     if (!archive) {
         printf("Error al abrir el archivo %s\n", archive_name);
         return;
     }
-    if (verbose_level >= VERBOSE_SIMPLE) {
-        printf("\tArchivo %s abierto con éxito para añadir.\n", archive_name);
+
+    // Buscar el archivo a actualizar
+    FileInfo file_info;
+    if (!find_file_info(archive, file_to_update, &file_info)) {
+        printf("El archivo %s no fue encontrado en el archivo.\n", file_to_update);
+        fclose(archive);
+        return;
     }
 
-    // Abrir el archivo a añadir
-    FILE *file = fopen(file_to_add, "rb");
-    if (!file) {
-        printf("Error al abrir el archivo %s\n", file_to_add);
+    if (file_info.status == DELETED) {
+        printf("El archivo %s está marcado como borrado y no se puede actualizar.\n", file_to_update);
+        fclose(archive);
+        return;
+    }
+    file_info.status = DELETED;
+    fseek(archive, file_info.start_position - sizeof(FileInfo), SEEK_SET);  // Regresar para actualizar la información
+    fwrite(&file_info, sizeof(FileInfo), 1, archive);
+
+    // Abrir el nuevo archivo para obtener su contenido
+    FILE *new_file_ptr = fopen(file_to_update, "rb");
+    if (!new_file_ptr) {
+        printf("Error al abrir el archivo %s\n", file_to_update);
         fclose(archive);
         return;
     }
 
     // Obtener tamaño del archivo a añadir
-    fseek(file, 0, SEEK_END);
-    int file_size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    if (verbose_level >= VERBOSE_DETAILED) {
-        printf("\tTamaño del archivo %s a añadir: %d bytes.\n", file_to_add, file_size);
-    }
+    fseek(new_file_ptr, 0, SEEK_END);
+    int new_content_size = ftell(new_file_ptr);
+    fseek(new_file_ptr, 0, SEEK_SET);
 
+    // Añadir el nuevo archivo, usando una lógica similar a append
     // Cargar espacios libres
     FreeSpaceInfo free_spaces[MAX_FREE_SPACES];
     load_free_spaces(archive, free_spaces);
@@ -93,7 +108,7 @@ void append(const char *archive_name, const char *file_to_add) {
     // Buscar primer espacio libre suficientemente grande usando First Fit
     int index_found = -1;
     for (int i = 0; i < MAX_FREE_SPACES; i++) {
-        if (free_spaces[i].size >= file_size + sizeof(FileInfo)) {
+        if (free_spaces[i].size >= new_content_size + sizeof(FileInfo)) {
             index_found = i;
             break;
         }
@@ -103,8 +118,8 @@ void append(const char *archive_name, const char *file_to_add) {
     if (index_found != -1) {
         // Usar el espacio libre encontrado
         start_position = free_spaces[index_found].start_position;
-        free_spaces[index_found].start_position += file_size + sizeof(FileInfo);
-        free_spaces[index_found].size -= (file_size + sizeof(FileInfo));
+        free_spaces[index_found].start_position += new_content_size + sizeof(FileInfo);
+        free_spaces[index_found].size -= (new_content_size + sizeof(FileInfo));
         if (free_spaces[index_found].size == 0) {
             memset(&free_spaces[index_found], 0, sizeof(FreeSpaceInfo)); // Resetear la estructura si el espacio se agota
         }
@@ -115,57 +130,37 @@ void append(const char *archive_name, const char *file_to_add) {
         start_position = ftell(archive);
     }
 
-    // Aquí insertas el código para verificar y corregir la superposición
-    int prev_file_end_pos = start_position - sizeof(FileInfo);
-    if (prev_file_end_pos > sizeof(int) + sizeof(FreeSpaceInfo) * MAX_FREE_SPACES + sizeof(ArchiveMetadata)) {
-        fseek(archive, prev_file_end_pos, SEEK_SET);
-        FileInfo prev_file_info;
-        fread(&prev_file_info, sizeof(FileInfo), 1, archive);
-        
-        // Calcula cuánto espacio del archivo anterior estás sobrescribiendo.
-        int overlap = prev_file_info.start_position + prev_file_info.file_size - start_position;
-
-        // Si hay superposición, actualiza el file_size del archivo previo.
-        if (overlap > 0) {
-            prev_file_info.file_size -= overlap;
-            fseek(archive, prev_file_end_pos, SEEK_SET);
-            fwrite(&prev_file_info, sizeof(FileInfo), 1, archive);
-        }
-    }
-    // Escribir información de archivo en el archivo de destino
-    FileInfo file_info;
-    strncpy(file_info.filename, file_to_add, 255);
-    file_info.filename[255 - 1] = '\0';
-    file_info.file_size = file_size;
-    file_info.status = ACTIVE;
-    file_info.start_position = start_position + sizeof(FileInfo);
-    fwrite(&file_info, sizeof(FileInfo), 1, archive);
+    // Escribir información del nuevo archivo en el archivo de destino
+    FileInfo new_file_info;
+    strncpy(new_file_info.filename, file_to_update, 255);
+    new_file_info.filename[255 - 1] = '\0';
+    new_file_info.file_size = new_content_size;
+    new_file_info.status = ACTIVE;
+    new_file_info.start_position = start_position + sizeof(FileInfo);
+    fwrite(&new_file_info, sizeof(FileInfo), 1, archive);
 
     // Escribir contenido del archivo en el archivo de destino
-    char *buffer = malloc(file_size);
-    fread(buffer, file_size, 1, file);
-    fwrite(buffer, file_size, 1, archive);
-
-    if (verbose_level >= VERBOSE_SIMPLE) {
-        printf("\tContenido del archivo %s añadido en el archivo de destino.\n", file_to_add);
-    }
+    char *buffer = malloc(new_content_size);
+    fread(buffer, new_content_size, 1, new_file_ptr);
+    fwrite(buffer, new_content_size, 1, archive);
+    free(buffer);
 
     // Actualizar metadatos y espacios libres
     fseek(archive, sizeof(int) + sizeof(FreeSpaceInfo) * MAX_FREE_SPACES, SEEK_SET);
     ArchiveMetadata metadata;
     fread(&metadata, sizeof(ArchiveMetadata), 1, archive);
     metadata.num_files++;
+
     fseek(archive, sizeof(int) + sizeof(FreeSpaceInfo) * MAX_FREE_SPACES, SEEK_SET);
     fwrite(&metadata, sizeof(ArchiveMetadata), 1, archive);
 
     save_free_spaces(archive, free_spaces);
 
-    // Cerrar archivos y liberar memoria
-    free(buffer);
-    fclose(file);
+    // Cerrar archivos
+    fclose(new_file_ptr);
     fclose(archive);
+    printf("El archivo %s ha sido actualizado.\n", file_to_update);
 }
-
 
 // create function
 void create(
@@ -256,6 +251,9 @@ void create(
     // Cerrar archivo
     fclose(archive);
 }
+
+
+
 void list(const char *archive_name) {
     // Abrir archivo
     FILE *archive = fopen(archive_name, "rb");
@@ -263,6 +261,10 @@ void list(const char *archive_name) {
         printf("Error al abrir el archivo %s\n", archive_name);
         return;
     }
+    //print archive size in print
+
+    
+
 
     // Saltar el número inicial de espacios libres
     fseek(archive, sizeof(int), SEEK_CUR);
@@ -295,16 +297,14 @@ void list(const char *archive_name) {
             active_files_count++;
             printf("\tArchivo: %s\n", file_info.filename);
             if (verbose_level == VERBOSE_DETAILED) {
-                printf("\tTamaño del archivo: %d bytes\n", file_info.file_size);
-                printf("\tPosición de inicio en el archivo comprimido: %d\n", file_info.start_position);
+                //file_info.file_size + sizeof(FileInfo) 
+                printf("\tTamaño del archivo: %lu bytes\n", file_info.file_size + sizeof(FileInfo));
+                printf("\tPosición de inicio en el archivo comprimido: %lu\n", file_info.start_position - sizeof(FileInfo));
             }
         }
 
-        // Si aún hay archivos por procesar, reposiciona el puntero al inicio del siguiente FileInfo
-        if (i < metadata.num_files - 1) {
-            // Avanza el puntero al próximo FileInfo usando fseek()
-            fseek(archive, file_info.start_position + file_info.file_size, SEEK_SET);
-        }
+        // Saltar contenido de archivo para llegar al próximo FileInfo
+        fseek(archive, file_info.file_size, SEEK_CUR);
     }
 
     fclose(archive);
@@ -314,7 +314,6 @@ void list(const char *archive_name) {
         printf("\tOperación de listar completada exitosamente.\n");
     }
 }
-
 
 
 void extractAll(
@@ -454,7 +453,6 @@ void delete(const char *archive_name, const char *file_to_delete) {
     }
 }
 
-
 bool find_file_info (
     FILE *archive, 
     const char *file_name, 
@@ -566,6 +564,174 @@ void print_free_spaces(const char *archive_name) {
     }
 }
 
+void append(const char *archive_name, const char *file_to_add) {
+    FILE *archive = fopen(archive_name, "rb+");
+    if (!archive) {
+        printf("Error al abrir el archivo %s\n", archive_name);
+        return;
+    }
+    if (verbose_level >= VERBOSE_SIMPLE) {
+        printf("\tArchivo %s abierto con éxito para añadir.\n", archive_name);
+    }
+
+    // Abrir el archivo a añadir
+    FILE *file = fopen(file_to_add, "rb");
+    if (!file) {
+        printf("Error al abrir el archivo %s\n", file_to_add);
+        fclose(archive);
+        return;
+    }
+
+    // Obtener tamaño del archivo a añadir
+    fseek(file, 0, SEEK_END);
+    int file_size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    if (verbose_level >= VERBOSE_DETAILED) {
+        printf("\tTamaño del archivo %s a añadir: %d bytes.\n", file_to_add, file_size);
+    }
+
+    // Cargar espacios libres
+    FreeSpaceInfo free_spaces[MAX_FREE_SPACES];
+    load_free_spaces(archive, free_spaces);
+
+    // Buscar primer espacio libre suficientemente grande usando First Fit
+    int index_found = -1;
+    for (int i = 0; i < MAX_FREE_SPACES; i++) {
+        if (free_spaces[i].size >= file_size + sizeof(FileInfo)) {
+            index_found = i;
+            break;
+        }
+    }
+
+    int start_position;
+    if (index_found != -1) {
+        // Usar el espacio libre encontrado
+        start_position = free_spaces[index_found].start_position;
+        free_spaces[index_found].start_position += file_size + sizeof(FileInfo);
+        free_spaces[index_found].size -= (file_size + sizeof(FileInfo));
+        if (free_spaces[index_found].size == 0) {
+            memset(&free_spaces[index_found], 0, sizeof(FreeSpaceInfo)); // Resetear la estructura si el espacio se agota
+        }
+        fseek(archive, start_position, SEEK_SET);
+    } else {
+        // Si no se encuentra un espacio libre adecuado, añadir al final
+        fseek(archive, 0, SEEK_END);
+        start_position = ftell(archive);
+    }
+
+    // Escribir información de archivo en el archivo de destino
+    FileInfo file_info;
+    strncpy(file_info.filename, file_to_add, 255);
+    file_info.filename[255 - 1] = '\0';
+    file_info.file_size = file_size;
+    file_info.status = ACTIVE;
+    file_info.start_position = start_position + sizeof(FileInfo);
+    fwrite(&file_info, sizeof(FileInfo), 1, archive);
+
+    // Escribir contenido del archivo en el archivo de destino
+    char *buffer = malloc(file_size);
+    fread(buffer, file_size, 1, file);
+    fwrite(buffer, file_size, 1, archive);
+    free(buffer); // Libera el buffer después de usarlo.
+
+    if (index_found != -1) {
+        // Si se utilizó un espacio libre, verifica si hay que rellenar
+        int remaining_space = free_spaces[index_found].size;
+        if (remaining_space > 0) {
+            char *fill_buffer = malloc(remaining_space);
+            memset(fill_buffer, 0, remaining_space);  // Rellenar con bytes nulos.
+            fwrite(fill_buffer, remaining_space, 1, archive);
+            free(fill_buffer);
+        }
+    }
+    if (verbose_level >= VERBOSE_SIMPLE) {
+        printf("\tContenido del archivo %s añadido en el archivo de destino.\n", file_to_add);
+    }
+
+    // Actualizar metadatos y espacios libres
+    fseek(archive, sizeof(int) + sizeof(FreeSpaceInfo) * MAX_FREE_SPACES, SEEK_SET);
+    ArchiveMetadata metadata;
+    fread(&metadata, sizeof(ArchiveMetadata), 1, archive);
+    metadata.num_files++;
+    fseek(archive, sizeof(int) + sizeof(FreeSpaceInfo) * MAX_FREE_SPACES, SEEK_SET);
+    fwrite(&metadata, sizeof(ArchiveMetadata), 1, archive);
+
+    save_free_spaces(archive, free_spaces);
+
+    // Cerrar archivos y liberar memoria
+    fclose(file);
+    fclose(archive);
+}
+void defragment(const char *archive_name) {
+    FILE *archive = fopen(archive_name, "rb+");
+    if (!archive) {
+        printf("Error al abrir el archivo %s\n", archive_name);
+        return;
+    }
+
+    if (verbose_level >= VERBOSE_SIMPLE) {
+        printf("Iniciando defragmentación del archivo %s...\n", archive_name);
+    }
+
+    // Saltar el número inicial de espacios libres
+    fseek(archive, sizeof(int), SEEK_SET);
+
+    // Saltar la lista de espacios libres
+    fseek(archive, sizeof(FreeSpaceInfo) * MAX_FREE_SPACES, SEEK_CUR);
+
+    // Leer metadatos del archivo
+    ArchiveMetadata metadata;
+    fread(&metadata, sizeof(ArchiveMetadata), 1, archive);
+
+    int write_position = sizeof(int) + sizeof(FreeSpaceInfo) * MAX_FREE_SPACES + sizeof(ArchiveMetadata);
+
+    for (int i = 0; i < metadata.num_files; i++) {
+        FileInfo file_info;
+        fread(&file_info, sizeof(FileInfo), 1, archive);
+
+        if (file_info.status == ACTIVE) {
+            if (write_position != file_info.start_position - sizeof(FileInfo)) {
+                if (verbose_level >= VERBOSE_DETAILED) {
+                    printf("Moviendo el archivo %s al espacio libre...\n", file_info.filename);
+                }
+
+                fseek(archive, write_position, SEEK_SET);
+                fwrite(&file_info, sizeof(FileInfo), 1, archive);
+
+                char *buffer = malloc(file_info.file_size);
+                fseek(archive, file_info.start_position, SEEK_SET);
+                fread(buffer, file_info.file_size, 1, archive);
+
+                fseek(archive, write_position + sizeof(FileInfo), SEEK_SET);
+                fwrite(buffer, file_info.file_size, 1, archive);
+                free(buffer);
+
+                file_info.start_position = write_position + sizeof(FileInfo);
+            }
+
+            write_position += sizeof(FileInfo) + file_info.file_size;
+        }
+
+        fseek(archive, file_info.start_position + file_info.file_size, SEEK_SET);
+    }
+
+    // Actualizar metadatos y lista de espacios libres si es necesario.
+    FreeSpaceInfo free_spaces[MAX_FREE_SPACES];
+    memset(&free_spaces, 0, sizeof(FreeSpaceInfo) * MAX_FREE_SPACES);
+    fseek(archive, sizeof(int), SEEK_SET);
+    fwrite(&free_spaces, sizeof(FreeSpaceInfo), MAX_FREE_SPACES, archive);
+
+    // Redimensionar el archivo al final de la escritura
+    ftruncate(fileno(archive), write_position);
+
+    if (verbose_level >= VERBOSE_SIMPLE) {
+        printf("Defragmentación completada exitosamente para el archivo %s.\n", archive_name);
+    }
+
+    fclose(archive);
+}
+
+
 
 
 void showValidOptions() {
@@ -588,6 +754,7 @@ void showValidOptions() {
     printf("\t./star -v --delete archivoSalida.tar archivo1.txt\n");
 
 }
+
 
 int main(int argc, char *argv[]) {
     int options_count = 0; // Contador de opciones
@@ -665,11 +832,14 @@ int main(int argc, char *argv[]) {
                 delete(archive_name, files_name[0]);
             } else if (strcmp(argv[i+1], "--update") == 0){
                 printf("update\n");
+                //void update(const char *archive_name, const char *file_to_update) {
+                update(archive_name,files_name[0]);
             } else if (strcmp(argv[i+1], "--append") == 0){
                 printf("append\n");
                 append(archive_name, files_name[0]);
             } else if (strcmp(argv[i+1], "--pack") == 0){
                 printf("pack\n");
+                defragment(archive_name);
             }else if(strcmp(argv[i+1], "--help")==0){
                 showValidOptions();
             } else {
@@ -693,16 +863,18 @@ int main(int argc, char *argv[]) {
                         break;
                     case 'u':
                         printf("update\n");
-                        print_free_spaces(archive_name);
+                        update(archive_name,files_name[0]);
                         break;
                     case 'r':
-                        printf("pack\n");
+                        printf("append\n");
+                        append(archive_name, files_name[0]);
                         break;
                     case 'v':
                         break;
                     case 'p':
-                        printf("append\n");
-                        append(archive_name, files_name[0]);
+                        printf("pack\n");
+                        defragment(archive_name);
+
                         break;
                     default:
                         printf("Opción no válida: %c\n", argv[i+1][j]);
@@ -711,9 +883,10 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
+
+
     }
-    //print verbose level
-    switch (verbose_level) {
+        switch (verbose_level) {
         case VERBOSE_NONE:
             printf("Nivel de detalle: Ninguno\n");
             break;

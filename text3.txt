@@ -1,8 +1,1 @@
-perros y gatos  2018-01-01  2018-01-01  2018-01-01  2018-01-01
-
-
-// Escribir ceros en el espacio libre restante si hay espacio sobrante
-int remaining_space = free_spaces[index_found].size;
-for (int i = 0; i < remaining_space; i++) {
-    fputc(0, archive);
-}
+Earl y Ericka
