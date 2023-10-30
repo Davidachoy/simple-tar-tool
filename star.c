@@ -150,7 +150,6 @@ void update(const char *archive_name, const char *file_to_update) {
     ArchiveMetadata metadata;
     fread(&metadata, sizeof(ArchiveMetadata), 1, archive);
     metadata.num_files++;
-
     fseek(archive, sizeof(int) + sizeof(FreeSpaceInfo) * MAX_FREE_SPACES, SEEK_SET);
     fwrite(&metadata, sizeof(ArchiveMetadata), 1, archive);
 
@@ -663,6 +662,8 @@ void append(const char *archive_name, const char *file_to_add) {
     fclose(archive);
 }
 void defragment(const char *archive_name) {
+    int active_files_count = 0;
+
     FILE *archive = fopen(archive_name, "rb+");
     if (!archive) {
         printf("Error al abrir el archivo %s\n", archive_name);
@@ -690,32 +691,33 @@ void defragment(const char *archive_name) {
         fread(&file_info, sizeof(FileInfo), 1, archive);
 
         if (file_info.status == ACTIVE) {
-            if (write_position != file_info.start_position - sizeof(FileInfo)) {
-                if (verbose_level >= VERBOSE_DETAILED) {
-                    printf("Moviendo el archivo %s al espacio libre...\n", file_info.filename);
-                }
+            active_files_count++;
 
-                fseek(archive, write_position, SEEK_SET);
-                fwrite(&file_info, sizeof(FileInfo), 1, archive);
+            char *buffer = malloc(sizeof(FileInfo) + file_info.file_size);
+            
+            // Leer FileInfo y contenido juntos
+            fseek(archive, file_info.start_position - sizeof(FileInfo), SEEK_SET);
+            fread(buffer, sizeof(FileInfo) + file_info.file_size, 1, archive);
+            
+            // Actualizar la posición de inicio
+            ((FileInfo*)buffer)->start_position = write_position + sizeof(FileInfo);
 
-                char *buffer = malloc(file_info.file_size);
-                fseek(archive, file_info.start_position, SEEK_SET);
-                fread(buffer, file_info.file_size, 1, archive);
+            // Escribir FileInfo y contenido juntos en la nueva posición
+            fseek(archive, write_position, SEEK_SET);
+            fwrite(buffer, sizeof(FileInfo) + file_info.file_size, 1, archive);
 
-                fseek(archive, write_position + sizeof(FileInfo), SEEK_SET);
-                fwrite(buffer, file_info.file_size, 1, archive);
-                free(buffer);
-
-                file_info.start_position = write_position + sizeof(FileInfo);
-            }
+            free(buffer);
 
             write_position += sizeof(FileInfo) + file_info.file_size;
         }
 
         fseek(archive, file_info.start_position + file_info.file_size, SEEK_SET);
     }
-
     // Actualizar metadatos y lista de espacios libres si es necesario.
+    metadata.num_files = active_files_count;
+    fseek(archive, sizeof(int) + sizeof(FreeSpaceInfo) * MAX_FREE_SPACES, SEEK_SET);
+    fwrite(&metadata, sizeof(ArchiveMetadata), 1, archive);
+
     FreeSpaceInfo free_spaces[MAX_FREE_SPACES];
     memset(&free_spaces, 0, sizeof(FreeSpaceInfo) * MAX_FREE_SPACES);
     fseek(archive, sizeof(int), SEEK_SET);
