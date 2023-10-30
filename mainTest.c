@@ -49,16 +49,16 @@ typedef struct {
 
 // Function Prototypes
 void create(const char *archive_name, char *files[], int num_files); // create function            
-void extract(const char *archive_name, const char *file_name); // extract function                     
 void list(const char *archive_name); // list function
 void delete(const char *archive_name, const char *file_to_delete); // delete function 
 void update (const char *archive_name, const char *file_to_update);// update function
-void append(char *archive_name, char *files[], int num_files); // append function
+void append(const char *archive_name, char *files[], int num_files); // append function
 void defragment(char *archive_name); // defragment function
 void verbose(char *archive_name); // verbose function
 
 bool find_file_info(FILE *archive, const char *file_name, FileInfo *file_info); // auxiliary function
 void mark_free_space(FILE *archive, int start_position, int size); // auxiliary function
+
 
 void print_free_spaces(const char *archive_name) {
     // Abrir archivo
@@ -92,8 +92,6 @@ void update_num_free_spaces(FILE *archive, int num_free_spaces) {
     fseek(archive, 0, SEEK_SET);  // Vuelve al inicio del archivo
     fwrite(&num_free_spaces, sizeof(int), 1, archive); // Escribe el valor actualizado
 }
-
-
 void load_free_spaces(FILE *archive, FreeSpaceInfo free_spaces[MAX_FREE_SPACES]) {
     // Posicionarse al inicio donde están los espacios libres.
     fseek(archive, sizeof(int), SEEK_SET);
@@ -291,6 +289,7 @@ void create(
     // Cerrar archivo
     fclose(archive);
 }
+
 void list(const char *archive_name) {
     // Abrir archivo
     FILE *archive = fopen(archive_name, "rb");
@@ -347,13 +346,6 @@ void list(const char *archive_name) {
     }
 }
 
-
-
-// extract function
-void extract(
-    const char *archive_name, 
-    const char *file_name
-) {
     // Abrir archivo
     FILE *archive = fopen(archive_name, "rb");
     if (!archive) {
@@ -436,7 +428,6 @@ void delete(const char *archive_name, const char *file_to_delete) {
     fclose(archive);
     printf("El archivo %s ha sido marcado como eliminado.\n", file_to_delete);
 }
-
 
 void list_free_spaces(const char *archive_name) {
     FILE *archive = fopen(archive_name, "rb");
@@ -586,209 +577,6 @@ void extractAll(
     fclose(archive);
 }
 
-
-void extractAllToFolder(const char *archive_name, const char *destination_folder) {
-    // Abrir el archivo tar
-    FILE *archive = fopen(archive_name, "rb");
-    if (!archive) {
-        printf("Error al abrir el archivo %s\n", archive_name);
-        return;
-    }
-
-    ArchiveMetadata metadata;
-    fread(&metadata, sizeof(ArchiveMetadata), 1, archive);
-
-    // Crear la ruta completa de destino
-    char full_destination_path[256];
-    snprintf(full_destination_path, sizeof(full_destination_path), "%s/", destination_folder);
-
-    // Recorrer y extraer todos los archivos
-    for (int i = 0; i < metadata.num_files; i++) {
-        FileInfo file_info;
-        fread(&file_info, sizeof(FileInfo), 1, archive);
-
-        // Verificar si el archivo está activo
-        if (file_info.status == ACTIVE) {
-            char full_file_path[512];
-            snprintf(full_file_path, sizeof(full_file_path), "%s%s", full_destination_path, file_info.filename);
-            FILE *output = fopen(full_file_path, "wb");
-            if (!output) {
-                printf("Error al abrir el archivo %s\n", full_file_path);
-            } else {
-                // Leer y escribir el contenido del archivo
-                fseek(archive, file_info.start_position, SEEK_SET);
-                char buffer[1024];
-                int bytes_left = file_info.file_size;
-
-                while (bytes_left > 0) {
-                    int bytes_to_read = bytes_left < sizeof(buffer) ? bytes_left : sizeof(buffer);
-                    fread(buffer, bytes_to_read, 1, archive);
-                    fwrite(buffer, bytes_to_read, 1, output);
-                    bytes_left -= bytes_to_read;
-                }
-
-                fclose(output);
-                printf("Archivo extraído: %s\n", full_file_path);
-            }
-        }
-    }
-
-    // Cerrar el archivo tar
-    fclose(archive);
-}
-
-int archivoExisteEnCarpeta(const char *archive, const char *file) {
-    char ruta_completa[256]; // Ajusta el tamaño según tus necesidades
-    snprintf(ruta_completa, sizeof(ruta_completa), "%s/%s", archive, file);
-
-    if (access(ruta_completa, F_OK) != -1) {
-        return 1; // El archivo existe en la carpeta
-    } else {
-        return 0; // El archivo no existe en la carpeta
-    }
-}
-
-void createFromFolderAndFile(const char *archive_name, const char *folder_name, const char *additional_file) {
-    // Abrir el archivo .tar
-    FILE *archive = fopen(archive_name, "wb");
-    if (!archive) {
-        printf("Error al abrir el archivo %s\n", archive_name);
-        return;
-    }
-
-    // Escribir metadata (inicialmente con 0 archivos)
-    ArchiveMetadata metadata = {0, 0};
-    fwrite(&metadata, sizeof(ArchiveMetadata), 1, archive);
-
-    // Abrir la carpeta
-    DIR *folder = opendir(folder_name);
-    if (!folder) {
-        printf("Error al abrir la carpeta %s\n", folder_name);
-        fclose(archive);
-        return;
-    }
-
-    // Recorrer los archivos en la carpeta
-    struct dirent *entry;
-    while ((entry = readdir(folder)) != NULL) {
-        if (entry->d_type == DT_REG) { // Solo archivos regulares
-            char full_path[512]; // Ajusta el tamaño según tus necesidades
-            snprintf(full_path, sizeof(full_path), "%s/%s", folder_name, entry->d_name);
-
-            FILE *file = fopen(full_path, "rb");
-            if (!file) {
-                printf("Error al abrir el archivo %s\n", full_path);
-                continue;
-            }
-
-            // Obtener tamaño del archivo
-            fseek(file, 0, SEEK_END);
-            int file_size = ftell(file);
-            fseek(file, 0, SEEK_SET);
-
-            // Escribir información del archivo en el archivo .tar
-            FileInfo file_info;
-            strncpy(file_info.filename, entry->d_name, 255);
-            file_info.filename[255 - 1] = '\0';
-            file_info.file_size = file_size;
-            file_info.status = ACTIVE;
-            file_info.start_position = ftell(archive) + sizeof(FileInfo);
-            fwrite(&file_info, sizeof(FileInfo), 1, archive);
-
-            // Escribir contenido del archivo
-            char *buffer = malloc(file_size);
-            fread(buffer, file_size, 1, file);
-            fwrite(buffer, file_size, 1, archive);
-
-            // Liberar memoria y cerrar el archivo
-            free(buffer);
-            fclose(file);
-
-            // Actualizar el número de archivos en la metadata
-            metadata.num_files++;
-        }
-    }
-
-    // Agregar el archivo adicional al archivo .tar
-    FILE *extra_file = fopen(additional_file, "rb");
-    if (extra_file) {
-        fseek(extra_file, 0, SEEK_END);
-        int extra_file_size = ftell(extra_file);
-        fseek(extra_file, 0, SEEK_SET);
-
-        FileInfo extra_file_info;
-        strncpy(extra_file_info.filename, additional_file, 255);
-        extra_file_info.filename[255 - 1] = '\0';
-        extra_file_info.file_size = extra_file_size;
-        extra_file_info.status = ACTIVE;
-        extra_file_info.start_position = ftell(archive) + sizeof(FileInfo);
-        fwrite(&extra_file_info, sizeof(FileInfo), 1, archive);
-
-        char *extra_buffer = malloc(extra_file_size);
-        fread(extra_buffer, extra_file_size, 1, extra_file);
-        fwrite(extra_buffer, extra_file_size, 1, archive);
-
-        free(extra_buffer);
-        fclose(extra_file);
-
-        metadata.num_files++;
-    } else {
-        printf("No se pudo abrir el archivo adicional %s\n", additional_file);
-    }
-
-    // Regresar al principio del archivo para actualizar la metadata
-    fseek(archive, 0, SEEK_SET);
-    fwrite(&metadata, sizeof(ArchiveMetadata), 1, archive);
-
-    // Cerrar la carpeta y el archivo .tar
-    closedir(folder);
-    fclose(archive);
-}
-
-int eliminarCarpetaRecursiva(const char *carpeta) {
-    DIR *d = opendir(carpeta);
-    size_t carpeta_len = strlen(carpeta);
-    int resultado = 1;
-
-    if (!d) {
-        perror("Error al abrir la carpeta");
-        return 0;
-    }
-
-    struct dirent *p;
-    while ((p = readdir(d)) != NULL) {
-        if (!strcmp(p->d_name, ".") || !strcmp(p->d_name, "..")) {
-            continue;
-        }
-
-        size_t len = carpeta_len + strlen(p->d_name) + 2;
-        char *buf = (char *)malloc(len);
-
-        if (buf) {
-            snprintf(buf, len, "%s/%s", carpeta, p->d_name);
-
-            struct stat statbuf;
-            if (!stat(buf, &statbuf)) {
-                if (S_ISDIR(statbuf.st_mode)) {
-                    resultado = eliminarCarpetaRecursiva(buf);
-                } else {
-                    resultado = remove(buf);
-                }
-            }
-
-            free(buf);
-        }
-    }
-
-    closedir(d);
-
-    if (resultado) {
-        resultado = rmdir(carpeta);
-    }
-
-    return resultado;
-}
-/*
 void update(const char *archive_name, const char *file_to_update) {
     FILE *archive = fopen(archive_name, "rb+");
     if (!archive) {
@@ -809,7 +597,7 @@ void update(const char *archive_name, const char *file_to_update) {
         fclose(archive);
         return;
     }
-
+    file_info.status= DELETED;
     // Abrir el nuevo archivo para obtener su contenido
     FILE *new_file_ptr = fopen(file_to_update, "rb");
     if (!new_file_ptr) {
@@ -825,64 +613,35 @@ void update(const char *archive_name, const char *file_to_update) {
 
     // Verificar que el nuevo contenido quepa en el espacio original del archivo
     if (new_content_size > file_info.file_size) {
-        printf("El nuevo contenido es demasiado grande para el archivo existente.\n");
+        printf("El nuevo contenido es demasiado grande para el archivo existente. Agregando al final\n");
+        // Obtener el tamaño del nuevo archivo
+        fseek(new_file_ptr, 0, SEEK_END);
+        size_t new_content_size = ftell(new_file_ptr);
+        fseek(new_file_ptr, 0, SEEK_SET);
+
+        // Crear una nueva entrada de archivo
+        FileInfo new_file_info;
+        strncpy(new_file_info.filename, file_to_update, 255);
+        new_file_info.filename[255 - 1] = '\0';
+        new_file_info.file_size = new_content_size;
+        new_file_info.status = ACTIVE;
+        new_file_info.start_position = ftell(archive) + sizeof(FileInfo);
+
+        // Escribir la información del nuevo archivo
+        fwrite(&new_file_info, sizeof(FileInfo), 1, archive);
+
+        // Copiar el contenido del nuevo archivo al archivo TAR
+        char buffer[1024];
+        size_t bytes_read;
+
+        while ((bytes_read = fread(buffer, 1, sizeof(buffer), new_file_ptr) > 0)) {
+            fwrite(buffer, 1, bytes_read, archive);
+        }
+
+        fclose(new_file_ptr);
         fclose(archive);
         fclose(new_file_ptr);
-        return;
-    }
 
-    // Actualizar el contenido del archivo con el nuevo contenido
-    fseek(archive, file_info.start_position, SEEK_SET);
-    fread(file_to_update, 1, new_content_size, new_file_ptr);
-    fwrite(file_to_update, 1, new_content_size, archive);
-
-    fclose(archive);
-    fclose(new_file_ptr);
-    printf("El archivo %s ha sido actualizado.\n", file_to_update);
-}
-// auxiliar functions for main
-*/
-
-void update(const char *archive_name, const char *file_to_update) {
-    FILE *archive = fopen(archive_name, "rb+");
-    if (!archive) {
-        printf("Error al abrir el archivo %s\n", archive_name);
-        return;
-    }
-
-    // Buscar el archivo a actualizar
-    FileInfo file_info;
-    if (!find_file_info(archive, file_to_update, &file_info)) {
-        printf("El archivo %s no fue encontrado en el archivo.\n", file_to_update);
-        fclose(archive);
-        return;
-    }
-
-    if (file_info.status == DELETED) {
-        printf("El archivo %s está marcado como borrado y no se puede actualizar.\n", file_to_update);
-        fclose(archive);
-        return;
-    }
-
-    // Abrir el nuevo archivo para obtener su contenido
-    FILE *new_file_ptr = fopen(file_to_update, "rb");
-    if (!new_file_ptr) {
-        printf("Error al abrir el archivo %s\n", file_to_update);
-        fclose(archive);
-        return;
-    }
-
-    // Calcular el tamaño del nuevo contenido
-    fseek(new_file_ptr, 0, SEEK_END);
-    size_t new_content_size = ftell(new_file_ptr);
-    fseek(new_file_ptr, 0, SEEK_SET);
-
-    // Verificar que el nuevo contenido quepa en el espacio original del archivo
-    if (new_content_size > file_info.file_size) {
-        printf("El nuevo contenido es demasiado grande para el archivo existente.\n");
-        fclose(archive);
-        fclose(new_file_ptr);
-        return;
     }
 
     // Posicionarse en el inicio del archivo a actualizar
@@ -910,6 +669,54 @@ void update(const char *archive_name, const char *file_to_update) {
     fclose(archive);
     fclose(new_file_ptr);
     printf("El archivo %s ha sido actualizado.\n", file_to_update);
+}
+
+void append(const char *archive_name, char *files[], int num_files) {
+    FILE *archive = fopen(archive_name, "rb+");
+    if (!archive) {
+        printf("Error al abrir el archivo %s\n", archive_name);
+        return;
+    }
+
+    fseek(archive, 0, SEEK_END);  // Posicionar al final del archivo
+
+    for (int i = 0; i < num_files; i++) {
+        char *file_to_add = files[i];
+        FILE *new_file_ptr = fopen(file_to_add, "rb");
+
+        if (!new_file_ptr) {
+            printf("Error al abrir el archivo %s\n", file_to_add);
+            continue;
+        }
+
+        // Obtener el tamaño del nuevo archivo
+        fseek(new_file_ptr, 0, SEEK_END);
+        size_t new_content_size = ftell(new_file_ptr);
+        fseek(new_file_ptr, 0, SEEK_SET);
+
+        // Crear una nueva entrada de archivo
+        FileInfo new_file_info;
+        strncpy(new_file_info.filename, file_to_add, 255);
+        new_file_info.filename[255 - 1] = '\0';
+        new_file_info.file_size = new_content_size;
+        new_file_info.status = ACTIVE;
+        new_file_info.start_position = ftell(archive) + sizeof(FileInfo);
+
+        // Escribir la información del nuevo archivo
+        fwrite(&new_file_info, sizeof(FileInfo), 1, archive);
+
+        // Copiar el contenido del nuevo archivo al archivo TAR
+        char buffer[1024];
+        size_t bytes_read;
+
+        while ((bytes_read = fread(buffer, 1, sizeof(buffer), new_file_ptr) > 0)) {
+            fwrite(buffer, 1, bytes_read, archive);
+        }
+
+        fclose(new_file_ptr);
+    }
+
+    fclose(archive);
 }
 
 //show valid optiones function
@@ -1014,6 +821,7 @@ int main(int argc, char *argv[]) {
                 update(archive_name, files_name[0]);
             } else if (strcmp(argv[i+1], "--append") == 0){
                 printf("append\n");
+                append(archive_name, files_name, num_files);
             } else if (strcmp(argv[i+1], "--pack") == 0){
                 printf("pack\n");
             }else if(strcmp(argv[i+1], "--help")==0){
@@ -1050,6 +858,7 @@ int main(int argc, char *argv[]) {
                         break;
                     case 'p':
                         printf("append\n");
+                        append(archive_name, files_name, num_files);
                         break;
                     default:
                         printf("Opción no válida: %c\n", argv[i+1][j]);
@@ -1073,13 +882,3 @@ int main(int argc, char *argv[]) {
     }
     return 0;
 }
-
-
-/*
-    Pendientes
-    #1. Implementar append
-    #2. Implementar pack
-    #3. Implementar delete
-    #4. Ver cuales tienen Verbose
-    #5. Pruebas
-*/
